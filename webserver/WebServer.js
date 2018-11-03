@@ -15,6 +15,9 @@ const robotImagePath = path.join(__dirname, '../client/img/robot.png');
 
 const defaultConfigFileLocation = "/etc/valetudo/config.json"
 
+const shmFolder = process.env.VAC_SHM ? process.env.VAC_SHM : "/dev/shm";
+const logFolder = process.env.VAC_LOG ? process.env.VAC_LOG : "/mnt/data/rockrobo/rrlog";
+
 /**
  *
  * @param options
@@ -57,6 +60,13 @@ const WebServer = function(options) {
         WebServer.MK_DIR_PATH(path.dirname(this.configFileLocation));
         writeConfigToFile();
     }
+
+    this.app.use(function(req, res, next) {
+        res.header("Access-Control-Allow-Origin", "*");
+        res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+        res.header('Access-Control-Allow-Methods', 'PUT, POST, GET, DELETE, OPTIONS');
+        next();
+    });
 
     this.app.get("/api/current_status", function(req,res) {
         self.vacuum.getCurrentStatus(function(err,data){
@@ -619,8 +629,9 @@ const WebServer = function(options) {
                         }
                         if (!drawCharger && !drawRobot) {
                             //console.log("Drawing no charger - no robot!");
-                            image.write(tmpDir + imagePath);
-                            sendResult();
+                            image.write(tmpDir + imagePath, function(){
+                                sendResult();
+                            });
                         } else if (drawRobot) {
                             //robot should be drawn (and maybe charger)
                             Jimp.read(robotImagePath)
@@ -636,13 +647,15 @@ const WebServer = function(options) {
                                                 let yPos = homeY - chargerImage.bitmap.height/2;
                                                 image.composite(chargerImage, xPos, yPos);
                                                 //console.log("Drawing charger - robot!");
-                                                image.write(tmpDir + imagePath);
-                                                sendResult();
+                                                image.write(tmpDir + imagePath, function(){
+                                                    sendResult();
+                                                });
                                             });
                                     } else {
                                         //console.log("Drawing no charger - robot!");
-                                        image.write(tmpDir + imagePath);
-                                        sendResult();
+                                        image.write(tmpDir + imagePath, function(){
+                                            sendResult();
+                                        });
                                     }
                                 });
                         } else {
@@ -693,9 +706,31 @@ const WebServer = function(options) {
                     }
                 });
 
+                function toBuffer(data, path) {
+                    const elementSize = path ? 8 : 7;
+                    const t = Buffer.alloc(data.length * elementSize);
+                    for (let i=0; i<data.length; i++) {
+                        if(!path) {
+                            t.writeUInt32BE(data[i][0], i * 7);
+                            t.writeUInt8(data[i][1], i * 7 + 4)
+                            t.writeUInt8(data[i][2], i * 7 + 5)
+                            t.writeUInt8(data[i][3], i * 7 + 6)
+                        } else {
+                            t.writeUInt32BE(data[i][0], i * 8);
+                            t.writeUInt32BE(data[i][1], i * 8 + 4);
+                           // console.log(i * 8, data[i][0], data[i][1]);
+                        }
+                    }
+                    console.log(t);
+                    return t;
+                }
+
+                console.log(data.map);
+                console.log(toBuffer(data.map));
+
                 res.json({
-                    path: coords,
-                    map: data.map
+                    path: toBuffer(coords, true).toString('base64'),
+                    map: toBuffer(data.map).toString('base64')
                 });
             } else {
                 res.status(500).send(err.toString());
@@ -712,6 +747,7 @@ const WebServer = function(options) {
 
     //this results in searching client folder first and
     //if file was not found within that folder, the tmp folder will be searched for that file
+    //this.app.use(express.static(path.join(__dirname, "..", 'dist')));
     this.app.use(express.static(path.join(__dirname, "..", 'client')));
     this.app.use(express.static((process.env.VAC_TMP_PATH ? process.env.VAC_TMP_PATH : "/tmp")));
     this.app.listen(this.port, function(){
@@ -767,7 +803,7 @@ WebServer.FIND_LATEST_MAP = function(callback) {
 };
 
 WebServer.FIND_LATEST_MAP_IN_RAMDISK = function(callback) {
-    fs.readdir("/dev/shm", function(err, filenames){
+    fs.readdir(shmFolder, function(err, filenames){
         if(err) {
             callback(err);
         } else {
@@ -784,13 +820,13 @@ WebServer.FIND_LATEST_MAP_IN_RAMDISK = function(callback) {
             });
 
             if(mapFileName && logFileName) {
-                fs.readFile(path.join("/dev/shm", logFileName), function(err, file){
+                fs.readFile(path.join(shmFolder, logFileName), function(err, file){
                     if(err) {
                         callback(err);
                     } else {
                         const log = file.toString();
                         if(log.indexOf("estimate") !== -1) {
-                            let mapPath = path.join("/dev/shm", mapFileName);
+                            let mapPath = path.join(shmFolder, mapFileName);
 
                             fs.readFile(mapPath, function(err, file){
                                 if(err) {
@@ -815,7 +851,7 @@ WebServer.FIND_LATEST_MAP_IN_RAMDISK = function(callback) {
                                                 isNavMap: true
                                             })
                                         } else {
-                                            fs.readFile("/dev/shm/GridMap", function(err, gridMapFile){
+                                            fs.readFile(path.join(shmFolder,"GridMap"), function(err, gridMapFile){
                                                 if(err) {
                                                     callback(new Error("Unable to get complete map file"))
                                                 } else {
@@ -849,7 +885,7 @@ WebServer.FIND_LATEST_MAP_IN_RAMDISK = function(callback) {
 };
 
 WebServer.FIND_LATEST_MAP_IN_ARCHIVE = function(callback) {
-    fs.readdir("/mnt/data/rockrobo/rrlog", function(err, filenames){
+    fs.readdir(logFolder, function(err, filenames){
         if(err) {
             callback(err);
         } else {
@@ -869,7 +905,7 @@ WebServer.FIND_LATEST_MAP_IN_ARCHIVE = function(callback) {
             for(let i in folders) {
                 const folder = folders.pop();
                 try {
-                    const folderContents = fs.readdirSync(path.join("/mnt/data/rockrobo/rrlog", folder));
+                    const folderContents = fs.readdirSync(path.join(logFolder, folder));
                     let possibleMapFileNames = [];
                     mapFileName = undefined;
                     logFileName = undefined;
@@ -897,7 +933,7 @@ WebServer.FIND_LATEST_MAP_IN_ARCHIVE = function(callback) {
             }
 
             if(newestUsableFolderName && mapFileName && logFileName) {
-                fs.readFile(path.join("/mnt/data/rockrobo/rrlog", newestUsableFolderName, logFileName), function(err, file){
+                fs.readFile(path.join(logFolder, newestUsableFolderName, logFileName), function(err, file){
                     if(err) {
                         callback(err);
                     } else {
@@ -907,7 +943,7 @@ WebServer.FIND_LATEST_MAP_IN_ARCHIVE = function(callback) {
                             } else {
                                 const log = unzippedFile.toString();
                                 if(log.indexOf("estimate") !== -1) {
-                                    fs.readFile(path.join("/mnt/data/rockrobo/rrlog", newestUsableFolderName, mapFileName), function(err, file){
+                                    fs.readFile(path.join(logFolder, newestUsableFolderName, mapFileName), function(err, file){
                                         if(err) {
                                             callback(err);
                                         } else {
