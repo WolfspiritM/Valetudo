@@ -23,7 +23,7 @@ export class ServerApi implements IValetudoApi {
   public Wifi: IValetudoWifiApi = new ServerWifiApi(this);
   public Sound: IValetudoSoundApi = new ServerSoundApi(this);
 
-  private host = "http://localhost/";
+  private host = "/";
 
   public async GetCurrentStatus(): Promise<IStatusResponse> {
     const response = await this.request("api/current_status");
