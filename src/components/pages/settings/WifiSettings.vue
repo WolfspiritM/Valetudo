@@ -34,7 +34,7 @@
                                 Signal
                             </div>
                             <div class="right" id="settings-wifi-current-connection-status-signal">
-                                {{ wifi.connection_info.signal }} dBm
+                                {{ wifi.connection_info.signal }}
                             </div>
                         </v-ons-list-item>
                         <v-ons-list-item>
@@ -42,7 +42,7 @@
                                 TX Bitrate
                             </div>
                             <div class="right" id="settings-wifi-current-connection-status-tx-bitrate">
-                                {{ wifi.connection_info.tx_bitrate }} MBit/s
+                                {{ wifi.connection_info.tx_bitrate }}
                             </div>
                         </v-ons-list-item>
 
